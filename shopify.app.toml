@@ -1,0 +1,26 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+name = "order-dashboard"
+client_id = "your_shopify_api_key"
+application_url = "https://flaccid-dully-addilyn.ngrok-free.dev"
+embedded = true
+
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = "read_orders,read_products"
+
+[auth]
+redirect_urls = [
+  "https://flaccid-dully-addilyn.ngrok-free.dev/auth/callback"
+]
+
+[webhooks]
+api_version = "2023-10"
+
+[pos]
+embedded = false
+
+[build]
+automatically_update_urls_on_dev = true
+dev_store_url = "your-dev-store.myshopify.com"
+include_config_on_deploy = true
