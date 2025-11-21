@@ -72,10 +72,13 @@ function App() {
 
   const fetchOrderDetails = async (orderId) => {
     try {
+      console.log(`Fetching order details for order ${orderId}`)
       const response = await axios.get(`http://localhost:3001/api/orders/${orderId}?shop=${shop}`)
+      console.log('Order details response:', response.data)
       setSelectedOrder(response.data)
     } catch (error) {
       console.error('Error fetching order details:', error)
+      alert('Failed to load order details. Please try again.')
     }
   }
 

@@ -1,7 +1,53 @@
 import { generateOrderReceipt } from '../utils/pdfGenerator'
 
 const OrderDetails = ({ order, onBack }) => {
-  const { order: orderData, items } = order
+  console.log('OrderDetails received order:', order)
+  
+  // Handle different response formats
+  let orderData, items
+  
+  if (order && order.order && order.items) {
+    // Format: { order: {...}, items: [...] }
+    orderData = order.order
+    items = order.items || []
+  } else if (order && !order.order) {
+    // Format: { id, order_id, total_price, ... } (direct order object)
+    orderData = order
+    items = []
+  } else {
+    console.error('Invalid order format:', order)
+    orderData = {}
+    items = []
+  }
+  
+  console.log('Processed orderData:', orderData)
+  console.log('Processed items:', items)
+  console.log('orderData.order_data type:', typeof orderData.order_data)
+  console.log('orderData.order_data value:', orderData.order_data)
+  
+  // If no valid order data, show error
+  if (!orderData || (!orderData.order_id && !orderData.id)) {
+    console.error('Invalid order data structure:', orderData)
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-24 h-24 bg-red-100 rounded-2xl flex items-center justify-center mx-auto mb-6">
+            <svg className="w-12 h-12 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+            </svg>
+          </div>
+          <h3 className="text-xl font-semibold text-gray-900 mb-2">Order Not Found</h3>
+          <p className="text-gray-500 mb-6">Unable to load order details. Please try again.</p>
+          <button
+            onClick={onBack}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl font-medium transition-colors"
+          >
+            Back to Dashboard
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   const handleDownloadInvoice = (orderData) => {
     const invoiceData = {
@@ -174,7 +220,17 @@ Thank you for your business!
     }
   }
 
-  const orderDetails = orderData.order_data ? JSON.parse(orderData.order_data) : {}
+  let orderDetails = {}
+  try {
+    if (orderData.order_data && typeof orderData.order_data === 'string') {
+      orderDetails = JSON.parse(orderData.order_data)
+    } else if (orderData.order_data && typeof orderData.order_data === 'object') {
+      orderDetails = orderData.order_data
+    }
+  } catch (error) {
+    console.error('Error parsing order_data:', error)
+    orderDetails = {}
+  }
 
   return (
     <div className="space-y-8">

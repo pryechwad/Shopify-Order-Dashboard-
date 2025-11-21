@@ -48,37 +48,47 @@ const fetchOrders = async (shop, accessToken, limit = 50) => {
 // Fetch single order details
 const fetchOrderDetails = async (shop, accessToken, orderId) => {
   try {
-    const client = new shopify.clients.Graphql({ session: { shop, accessToken } });
+    console.log(`🔍 Fetching order ${orderId} from Shopify for shop ${shop}`);
+    
+    const client = new shopify.clients.Graphql({ 
+      session: { 
+        shop, 
+        accessToken,
+        id: `offline_${shop}`,
+        state: 'active',
+        isOnline: false
+      } 
+    });
     
     // Convert order ID to GraphQL ID format
     const gqlOrderId = `gid://shopify/Order/${orderId}`;
+    console.log(`🏷️ Using GraphQL ID: ${gqlOrderId}`);
     
-    const response = await client.query({
-      data: {
-        query: ORDER_DETAILS_QUERY,
-        variables: {
-          id: gqlOrderId,
-        },
+    const response = await client.request(ORDER_DETAILS_QUERY, {
+      variables: {
+        id: gqlOrderId,
       },
     });
 
-    if (response.body.errors) {
-      throw new Error(`GraphQL errors: ${JSON.stringify(response.body.errors)}`);
+    if (response.errors) {
+      throw new Error(`GraphQL errors: ${JSON.stringify(response.errors)}`);
     }
 
-    const order = response.body.data.order;
+    const order = response.data.order;
     if (!order) {
       throw new Error('Order not found');
     }
 
+    console.log(`✅ Found order: ${order.name} with total $${order.totalPriceSet.shopMoney.amount}`);
+
     const orderDetails = {
       id: order.id,
       order_id: order.name.replace('#', ''),
-      shop: shop,
+      shop: shop.replace('.myshopify.com', ''),
       status: order.displayFinancialStatus?.toLowerCase() || 'pending',
       total_price: order.totalPriceSet.shopMoney.amount,
-      subtotal_price: order.subtotalPriceSet.shopMoney.amount,
-      total_tax: order.totalTaxSet.shopMoney.amount,
+      subtotal_price: order.subtotalPriceSet?.shopMoney?.amount || order.totalPriceSet.shopMoney.amount,
+      total_tax: order.totalTaxSet?.shopMoney?.amount || '0.00',
       currency: order.totalPriceSet.shopMoney.currencyCode,
       customer_email: order.customer?.email || null,
       customer_name: order.customer ? `${order.customer.firstName || ''} ${order.customer.lastName || ''}`.trim() : null,
@@ -107,12 +117,14 @@ const fetchOrderDetails = async (shop, accessToken, orderId) => {
       };
     });
 
+    console.log(`📦 Returning order details with ${lineItems.length} items`);
+
     return {
       order: orderDetails,
       items: lineItems
     };
   } catch (error) {
-    console.error('Error fetching order details:', error);
+    console.error('❌ Error fetching order details:', error);
     throw error;
   }
 };
@@ -120,8 +132,7 @@ const fetchOrderDetails = async (shop, accessToken, orderId) => {
 // Fetch orders from last 60 days
 const fetchRecentOrders = async (shop, accessToken) => {
   try {
-    const sixtyDaysAgo = new Date();
-    sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
+    console.log(`📥 Fetching recent orders for shop: ${shop}`);
     
     const client = new shopify.clients.Graphql({ 
       session: { 
@@ -178,7 +189,7 @@ const fetchRecentOrders = async (shop, accessToken) => {
       return {
         id: order.id,
         order_id: order.name.replace('#', ''),
-        shop: shop,
+        shop: shop.replace('.myshopify.com', ''),
         status: order.displayFinancialStatus?.toLowerCase() || 'pending',
         total_price: order.totalPriceSet.shopMoney.amount,
         currency: order.totalPriceSet.shopMoney.currencyCode,
@@ -189,9 +200,10 @@ const fetchRecentOrders = async (shop, accessToken) => {
       };
     });
 
+    console.log(`✅ Fetched ${orders.length} orders from Shopify`);
     return orders;
   } catch (error) {
-    console.error('Error fetching recent orders:', error);
+    console.error('❌ Error fetching recent orders:', error);
     throw error;
   }
 };

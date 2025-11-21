@@ -473,7 +473,7 @@ const OrderList = ({ orders, onSelectOrder }) => {
               </thead>
               <tbody className="divide-y divide-gray-200">
                 {filteredOrders.map((order, index) => (
-                  <tr key={order.id} className="hover:bg-gray-50 transition-colors cursor-pointer" onClick={() => onSelectOrder(order.order_id)}>
+                  <tr key={order.id} className="hover:bg-gray-50 transition-colors">
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center">
                         <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-indigo-600 rounded-lg flex items-center justify-center mr-4">
@@ -521,7 +521,11 @@ const OrderList = ({ orders, onSelectOrder }) => {
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                       <div className="flex items-center justify-end space-x-2">
                         <button 
-                          onClick={() => onSelectOrder(order.order_id)}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            console.log('View Details clicked for order:', order.order_id)
+                            onSelectOrder(order.order_id)
+                          }}
                           className="bg-blue-100 text-blue-700 px-3 py-1 rounded-lg hover:bg-blue-200 transition-colors text-xs font-medium"
                         >
                           View Details

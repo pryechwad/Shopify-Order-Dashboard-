@@ -93,41 +93,58 @@ app.get('/api/orders', async (req, res) => {
   const { shop } = req.query;
   
   try {
+    console.log(`📊 Fetching orders for shop: ${shop}`);
+    
     // Ensure shop domain format consistency
     const shopDomain = shop.includes('.myshopify.com') ? shop : `${shop}.myshopify.com`;
     
-    // Check if we have access token for this shop
+    // First, try to get orders from database
+    const result = await pool.query(
+      'SELECT * FROM orders WHERE shop = $1 ORDER BY created_at DESC',
+      [shop]
+    );
+    
+    console.log(`📦 Found ${result.rows.length} orders in database for shop ${shop}`);
+    
+    // Check if we have access token for this shop to sync fresh data
     const shopResult = await pool.query(
       'SELECT access_token FROM shops WHERE shop_domain = $1',
       [shopDomain]
     );
     
     if (shopResult.rows.length > 0 && process.env.SHOPIFY_API_KEY) {
-      // Use real Shopify API
-      const accessToken = shopResult.rows[0].access_token;
-      const orders = await fetchRecentOrders(shop, accessToken);
+      console.log(`🔄 Syncing fresh orders from Shopify for ${shop}`);
       
-      // Store orders in database
-      await storeOrdersInDatabase(orders);
-      
-      return res.json(orders);
-    } else {
-      // Fallback to demo data or database
-      const result = await pool.query(
-        'SELECT * FROM orders WHERE shop = $1 ORDER BY created_at DESC',
-        [shop]
-      );
-      
-      if (result.rows.length === 0) {
-        // Generate demo data
-        const demoOrders = generateDemoOrders(shop);
-        return res.json(demoOrders);
+      try {
+        // Use real Shopify API to get fresh data
+        const accessToken = shopResult.rows[0].access_token;
+        const orders = await fetchRecentOrders(shopDomain, accessToken);
+        
+        console.log(`📥 Fetched ${orders.length} orders from Shopify`);
+        
+        // Store orders in database
+        await storeOrdersInDatabase(orders);
+        
+        // Return fresh data from Shopify
+        return res.json(orders);
+      } catch (syncError) {
+        console.error('❌ Error syncing from Shopify, using database data:', syncError);
+        // Fall back to database data if sync fails
       }
-      
-      res.json(result.rows);
     }
+    
+    if (result.rows.length > 0) {
+      console.log(`📋 Returning ${result.rows.length} orders from database`);
+      return res.json(result.rows);
+    }
+    
+    // Generate demo data if no orders found
+    console.log(`🎭 No orders found, generating demo data for ${shop}`);
+    const demoOrders = generateDemoOrders(shop);
+    res.json(demoOrders);
+    
   } catch (error) {
-    console.error('Error fetching orders:', error);
+    console.error('❌ Error fetching orders:', error);
     // Fallback to demo data
     const demoOrders = generateDemoOrders(shop);
     res.json(demoOrders);
@@ -139,46 +156,63 @@ app.get('/api/orders/:orderId', async (req, res) => {
   const { shop } = req.query;
   
   try {
+    console.log(`🔍 Fetching order details for order ${orderId} in shop ${shop}`);
+    
     // Ensure shop domain format consistency
     const shopDomain = shop.includes('.myshopify.com') ? shop : `${shop}.myshopify.com`;
     
-    // Check if we have access token for this shop
+    // First try to get from database
+    const orderResult = await pool.query(
+      'SELECT * FROM orders WHERE order_id = $1 AND shop = $2',
+      [orderId, shop]
+    );
+    
+    console.log(`📋 Found ${orderResult.rows.length} orders in database`);
+    
+    // Check if we have access token for this shop to get fresh data
     const shopResult = await pool.query(
       'SELECT access_token FROM shops WHERE shop_domain = $1',
       [shopDomain]
     );
     
     if (shopResult.rows.length > 0 && process.env.SHOPIFY_API_KEY) {
-      // Use real Shopify API
-      const accessToken = shopResult.rows[0].access_token;
-      const orderDetails = await fetchOrderDetails(shop, accessToken, orderId);
+      console.log(`🔄 Fetching fresh order details from Shopify`);
       
-      return res.json(orderDetails);
-    } else {
-      // Fallback to database or demo data
-      const orderResult = await pool.query(
-        'SELECT * FROM orders WHERE order_id = $1 AND shop = $2',
-        [orderId, shop]
-      );
-      
+      try {
+        // Use real Shopify API for fresh data
+        const accessToken = shopResult.rows[0].access_token;
+        const orderDetails = await fetchOrderDetails(shopDomain, accessToken, orderId);
+        
+        console.log(`✅ Got order details from Shopify: $${orderDetails.order.total_price}`);
+        return res.json(orderDetails);
+      } catch (shopifyError) {
+        console.error('❌ Error fetching from Shopify, using database:', shopifyError);
+        // Fall back to database if Shopify fails
+      }
+    }
+    
+    if (orderResult.rows.length > 0) {
+      // Get line items from database
       const itemsResult = await pool.query(
         'SELECT fi.*, i.image_url FROM fulfillment_items fi LEFT JOIN images i ON fi.id = i.return_item_id WHERE fi.order_id = $1',
         [orderId]
       );
       
-      if (orderResult.rows.length === 0) {
-        // Generate demo order
-        const demoOrder = generateDemoOrder(shop, orderId);
-        return res.json(demoOrder);
-      }
+      console.log(`📦 Returning order from database: $${orderResult.rows[0].total_price}`);
       
-      res.json({
+      return res.json({
         order: orderResult.rows[0],
         items: itemsResult.rows
       });
     }
+    
+    // Generate demo order only if nothing found
+    console.log(`🎭 Generating demo order for ${orderId}`);
+    const demoOrder = generateDemoOrder(shop, orderId);
+    res.json(demoOrder);
+    
   } catch (error) {
-    console.error('Error fetching order details:', error);
+    console.error('❌ Error fetching order details:', error);
     const demoOrder = generateDemoOrder(shop, orderId);
     res.json(demoOrder);
   }
@@ -207,24 +241,28 @@ const generateDemoOrders = (shopName) => {
 };
 
 const generateDemoOrder = (shop, orderId) => {
+  // Use consistent demo data based on orderId to avoid different amounts
+  const seed = parseInt(orderId) || 1001;
+  const basePrice = 50 + (seed % 450); // Consistent price based on order ID
+  
   return {
     order: {
       id: orderId,
       shop: shop,
       order_id: orderId,
-      status: ['paid', 'pending', 'refunded'][Math.floor(Math.random() * 3)],
-      total_price: (Math.random() * 500 + 50).toFixed(2),
-      customer_email: `customer@${shop}.com`,
-      created_at: new Date(Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000).toISOString()
+      status: ['paid', 'pending', 'refunded'][seed % 3],
+      total_price: basePrice.toFixed(2),
+      customer_email: `customer${seed % 5}@${shop}.com`,
+      created_at: new Date(Date.now() - (seed % 30) * 24 * 60 * 60 * 1000).toISOString()
     },
     items: [
       {
         id: 1,
-        product_title: `${shop.charAt(0).toUpperCase() + shop.slice(1)} Product`,
+        product_title: `${shop.charAt(0).toUpperCase() + shop.slice(1)} Product ${seed % 10}`,
         variant_title: 'Default Variant',
-        qty: Math.floor(Math.random() * 3) + 1,
-        price: (Math.random() * 200 + 25).toFixed(2),
-        line_item_id: Math.floor(Math.random() * 10000)
+        qty: (seed % 3) + 1,
+        price: (basePrice * 0.8).toFixed(2),
+        line_item_id: seed + 1000
       }
     ]
   };
@@ -232,16 +270,27 @@ const generateDemoOrder = (shop, orderId) => {
 
 // Store orders in database
 const storeOrdersInDatabase = async (orders) => {
+  console.log(`💾 Storing ${orders.length} orders in database...`);
+  
   for (const order of orders) {
     try {
+      // Extract shop name without .myshopify.com for consistency
+      const shopName = order.shop.replace('.myshopify.com', '');
+      
+      console.log(`📦 Storing order ${order.order_id} for shop ${shopName}`);
+      
       await pool.query(
         'INSERT INTO orders (shop, order_id, status, total_price, customer_email, created_at, order_data) VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (shop, order_id) DO UPDATE SET status = $3, total_price = $4, order_data = $7',
-        [order.shop, order.order_id, order.status, order.total_price, order.customer_email, order.created_at, order.order_data]
+        [shopName, order.order_id, order.status, order.total_price, order.customer_email, order.created_at, order.order_data || JSON.stringify(order)]
       );
+      
+      console.log(`✅ Successfully stored order ${order.order_id}`);
     } catch (error) {
-      console.error(`Error storing order ${order.order_id}:`, error);
+      console.error(`❌ Error storing order ${order.order_id}:`, error);
     }
   }
+  
+  console.log(`✅ Finished storing ${orders.length} orders`);
 };
 
 // Legacy function for compatibility
@@ -494,6 +543,77 @@ async function initDatabase() {
   }
 }
 
+// Debug endpoint to check database state
+app.get('/api/debug/:shop', async (req, res) => {
+  const { shop } = req.params;
+  
+  try {
+    // Check shop authentication
+    const shopDomain = shop.includes('.myshopify.com') ? shop : `${shop}.myshopify.com`;
+    const shopResult = await pool.query(
+      'SELECT * FROM shops WHERE shop_domain = $1',
+      [shopDomain]
+    );
+    
+    // Check orders in database
+    const ordersResult = await pool.query(
+      'SELECT COUNT(*) as count, MAX(created_at) as latest_order FROM orders WHERE shop = $1',
+      [shop]
+    );
+    
+    // Get sample orders
+    const sampleOrders = await pool.query(
+      'SELECT order_id, status, total_price, customer_email, created_at FROM orders WHERE shop = $1 ORDER BY created_at DESC LIMIT 5',
+      [shop]
+    );
+    
+    res.json({
+      shop: shop,
+      shopDomain: shopDomain,
+      authenticated: shopResult.rows.length > 0,
+      authDetails: shopResult.rows[0] || null,
+      ordersCount: ordersResult.rows[0]?.count || 0,
+      latestOrder: ordersResult.rows[0]?.latest_order || null,
+      sampleOrders: sampleOrders.rows,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Debug endpoint error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Test order details endpoint
+app.get('/api/test-order/:orderId', (req, res) => {
+  const { orderId } = req.params;
+  const { shop } = req.query;
+  
+  console.log(`🧪 Test endpoint called for order ${orderId} in shop ${shop}`);
+  
+  res.json({
+    success: true,
+    orderId: orderId,
+    shop: shop,
+    message: 'Test endpoint working',
+    order: {
+      order_id: orderId,
+      shop: shop,
+      status: 'paid',
+      total_price: '99.99',
+      customer_email: 'test@example.com',
+      created_at: new Date().toISOString()
+    },
+    items: [
+      {
+        id: 1,
+        product_title: 'Test Product',
+        qty: 1,
+        price: '99.99'
+      }
+    ]
+  });
+});
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
@@ -507,6 +627,7 @@ app.listen(PORT, async () => {
     console.log(`🔗 Health check: http://localhost:${PORT}/health`);
     console.log(`🔐 Auth URL: http://localhost:${PORT}/auth?shop=YOUR_SHOP_NAME`);
     console.log(`📊 REST API: http://localhost:${PORT}/api/orders`);
+    console.log(`🐛 Debug API: http://localhost:${PORT}/api/debug/YOUR_SHOP_NAME`);
   } catch (error) {
     console.error('❌ Failed to start server:', error);
     process.exit(1);
